@@ -21,12 +21,9 @@ def capture_session_token(page: Page, config: AppConfig) -> str:
     captured: dict[str, str] = {}
 
     def on_request(request) -> None:
-        try:
-            token = request.headers.get("sk")
-            if token and "partner.market.yandex.ru" in request.url:
-                captured["sk"] = token
-        except Exception:
-            pass
+        token = request.headers.get("sk")
+        if token and "partner.market.yandex.ru" in request.url:
+            captured["sk"] = token
 
     page.on("request", on_request)
 

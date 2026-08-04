@@ -84,7 +84,7 @@ class YandexBoostClient:
     @staticmethod
     def _raise_api_error(payload: Any) -> None:
         if not isinstance(payload, dict):
-            raise RuntimeError("API response is not a JSON object.")
+            raise TypeError("API response is not a JSON object.")
 
         results = payload.get("results")
         if not isinstance(results, list) or not results:

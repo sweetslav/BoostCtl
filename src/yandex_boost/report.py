@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -44,7 +44,7 @@ class CsvReport:
                 writer.writeheader()
             writer.writerow(
                 {
-                    "timestamp": datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+                    "timestamp": datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M:%S"),
                     "sku": sku,
                     "bid": bid,
                     "campaign_name": campaign_name,

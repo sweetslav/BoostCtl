@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -17,7 +17,7 @@ def setup_logging(log_dir: Path, verbose: bool = False) -> logging.Logger:
     )
 
     file_handler = logging.FileHandler(
-        log_dir / f"{datetime.now():%Y-%m-%d}.log",
+        log_dir / f"{datetime.now(timezone.utc):%Y-%m-%d}.log",
         encoding="utf-8",
     )
     file_handler.setLevel(logging.DEBUG)

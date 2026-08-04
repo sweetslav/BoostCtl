@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -44,7 +44,7 @@ def resolve_date(value: str) -> str:
     if not value:
         return datetime.now().astimezone().strftime("%d.%m.%Y")
     try:
-        return datetime.strptime(value, "%d.%m.%Y").strftime("%d.%m.%Y")
+        return datetime.strptime(value, "%d.%m.%Y").replace(tzinfo=timezone.utc).strftime("%d.%m.%Y")
     except ValueError as exc:
         raise SystemExit("Date must use DD.MM.YYYY format.") from exc
 

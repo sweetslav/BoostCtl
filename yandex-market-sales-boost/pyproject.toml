@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yandex-market-sales-boost"
+version = "1.0.0"
+description = "Create separate Yandex Market Sales Boost campaigns per SKU."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.55,<2",
+]
+
+[project.scripts]
+yandex-boost = "yandex_boost.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

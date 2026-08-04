@@ -1,0 +1,8 @@
+{
+  "business_id": 950637,
+  "source_type": "BUSINESS",
+  "cost_model": "CPA",
+  "offer_service": "MARKET",
+  "request_delay_seconds": 0.8,
+  "max_retries": 3
+}

@@ -1,0 +1,26 @@
+# Secrets and browser sessions
+browser_profile/
+.env
+*.har
+
+# User data and reports
+data/campaigns.json
+data/offer_cache.json
+reports/*
+!reports/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

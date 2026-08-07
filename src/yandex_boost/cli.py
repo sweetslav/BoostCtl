@@ -13,6 +13,7 @@ from .auth import capture_session_token
 from .cache import OfferCache
 from .client import YandexBoostClient
 from .config import load_campaigns, load_config
+from .generator import InputFormatError, build_campaigns_json
 from .inventory import (
     duplicate_skus,
     fetch_campaign_inventory,
@@ -33,9 +34,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "command",
-        choices=["validate", "preflight", "test", "run", "retry-errors", "export"],
+        choices=[
+            "validate", "preflight", "test", "run", "retry-errors", "export",
+            "delete-preview", "delete", "make-json",
+        ],
     )
     parser.add_argument("--campaigns", default="data/campaigns.json")
+    parser.add_argument("--delete-file", default="data/campaigns_to_delete.json")
+    parser.add_argument("--input-list", default="data/campaigns_input.txt")
     parser.add_argument("--config", default="config.json")
     parser.add_argument("--date", default="")
     parser.add_argument("--start", type=int, default=0)
@@ -86,21 +92,90 @@ def _print_preflight(selected, existing_skus: set[str], duplicates_count: int) -
     return new_items
 
 
+
+def _load_delete_ids(path: Path) -> list[str]:
+    if not path.exists():
+        raise SystemExit(f"Не найден файл удаления: {path}")
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise SystemExit("Файл удаления должен содержать JSON-массив campaign_id.")
+
+    ids = [str(value).strip() for value in raw]
+    if not ids or any(not value.isdigit() for value in ids):
+        raise SystemExit("Все campaign_id должны быть непустыми числовыми значениями.")
+    if len(ids) != len(set(ids)):
+        raise SystemExit("В файле удаления есть повторяющиеся campaign_id.")
+    return ids
+
+
+def _print_delete_preview(delete_ids: list[str], inventory) -> tuple[list, list[str]]:
+    by_id = {row.campaign_id: row for row in inventory}
+    found = [by_id[campaign_id] for campaign_id in delete_ids if campaign_id in by_id]
+    missing = [campaign_id for campaign_id in delete_ids if campaign_id not in by_id]
+
+    print()
+    print("ПРОВЕРКА УДАЛЕНИЯ")
+    print(f"ID в файле: {len(delete_ids)}")
+    print(f"Найдено в Яндексе: {len(found)}")
+    print(f"Не найдено: {len(missing)}")
+
+    for row in found:
+        print(f"  {row.campaign_id} | {row.sku} | {row.campaign_name}")
+
+    if missing:
+        print("\nНЕ НАЙДЕНЫ:")
+        for campaign_id in missing:
+            print(f"  {campaign_id}")
+
+    return found, missing
+
 def main() -> int:
     args = build_parser().parse_args()
+
+    if args.command == "make-json":
+        input_path = ROOT / args.input_list
+        output_path = ROOT / args.campaigns
+        try:
+            campaigns = build_campaigns_json(input_path, output_path)
+        except (FileNotFoundError, InputFormatError) as exc:
+            print(f"ОШИБКА: {exc}")
+            return 2
+
+        print()
+        print("CAMPAIGNS.JSON СОЗДАН")
+        print(f"Источник: {input_path}")
+        print(f"Результат: {output_path}")
+        print(f"Кампаний: {len(campaigns)}")
+        print()
+        print("Первые строки:")
+        for item in campaigns[:10]:
+            print(f"  {item['sku']} | ставка {item['bid']:g}%")
+        if len(campaigns) > 10:
+            print(f"  ... ещё {len(campaigns) - 10}")
+        print()
+        print("Следующий безопасный шаг: 01_VALIDATE.bat")
+        return 0
+
     config = load_config(ROOT / args.config)
-    campaigns = load_campaigns(ROOT / args.campaigns)
     logger = setup_logging(ROOT / "logs", args.verbose)
     report = CsvReport(ROOT / "reports" / "api_report.csv")
     cache = OfferCache(ROOT / "data" / "offer_cache.json")
     run_date = resolve_date(args.date)
 
+    campaigns = []
+    selected = []
+    if args.command not in {"export", "delete-preview", "delete"}:
+        campaigns = load_campaigns(ROOT / args.campaigns)
+
     if args.command == "validate":
         print(f"OK: {len(campaigns)} строк, дублей SKU во входном файле нет.")
         return 0
 
-    selected = _select_campaigns(args, campaigns, report)
-    if not selected and args.command != "export":
+    if campaigns:
+        selected = _select_campaigns(args, campaigns, report)
+
+    if not selected and args.command not in {"export", "delete-preview", "delete"}:
         print("Нет строк для обработки.")
         return 0
 
@@ -114,6 +189,7 @@ def main() -> int:
 
         try:
             token = capture_session_token(page, config)
+            print("\nСканирую текущие кампании Яндекса...", flush=True)
             inventory = fetch_campaign_inventory(page, config)
             inventory_path = ROOT / "reports" / "campaigns_from_yandex.csv"
             write_inventory_csv(inventory, inventory_path)
@@ -124,6 +200,86 @@ def main() -> int:
             print(f"Уникальных SKU: {len(existing_skus)}")
             print(f"SKU с дублями: {len(duplicates)}")
             print(f"Снимок сохранён: {inventory_path}")
+
+            if args.command in {"delete-preview", "delete"}:
+                delete_ids = _load_delete_ids(ROOT / args.delete_file)
+                found, missing = _print_delete_preview(delete_ids, inventory)
+
+                if args.command == "delete-preview":
+                    print("\nНичего не удалено.")
+                    return 0
+
+                if missing:
+                    print("\nУДАЛЕНИЕ ОТМЕНЕНО: не все ID найдены в текущем списке.")
+                    return 2
+
+                expected = f"DELETE {len(found)}"
+                print()
+                print("ВНИМАНИЕ: операция необратима.")
+                confirmation = input(f"Для удаления введите {expected}: ").strip()
+                if confirmation != expected:
+                    print("Удаление отменено.")
+                    return 0
+
+                client = YandexBoostClient(page, config, token)
+                deleted = 0
+                failed = 0
+                delete_report = ROOT / "reports" / "delete_report.csv"
+                import csv
+
+                write_header = not delete_report.exists()
+                with delete_report.open("a", encoding="utf-8-sig", newline="") as file:
+                    writer = csv.DictWriter(
+                        file,
+                        fieldnames=["campaign_id", "sku", "campaign_name", "status", "details"],
+                        delimiter=";",
+                    )
+                    if write_header:
+                        writer.writeheader()
+
+                    for index, row in enumerate(found, start=1):
+                        print(f"[{index}/{len(found)}] DELETE {row.campaign_id} | {row.sku}")
+                        try:
+                            client.delete_campaign(row.campaign_id)
+                            writer.writerow(
+                                {
+                                    "campaign_id": row.campaign_id,
+                                    "sku": row.sku,
+                                    "campaign_name": row.campaign_name,
+                                    "status": "DELETED",
+                                    "details": "",
+                                }
+                            )
+                            deleted += 1
+                            page.wait_for_timeout(400)
+                        except Exception as exc:  # noqa: BLE001
+                            writer.writerow(
+                                {
+                                    "campaign_id": row.campaign_id,
+                                    "sku": row.sku,
+                                    "campaign_name": row.campaign_name,
+                                    "status": "ERROR",
+                                    "details": f"{type(exc).__name__}: {exc}",
+                                }
+                            )
+                            print(f"  ERROR: {type(exc).__name__}: {exc}")
+                            failed += 1
+
+                print(f"\nУдалено: {deleted}")
+                print(f"Ошибок: {failed}")
+
+                # Final control snapshot.
+                print("\nОбновляю список кампаний после удаления...", flush=True)
+                refreshed = fetch_campaign_inventory(page, config)
+                write_inventory_csv(refreshed, inventory_path)
+                refreshed_skus = inventory_skus(refreshed)
+                refreshed_duplicates = duplicate_skus(refreshed)
+                print("\nКОНТРОЛЬ ПОСЛЕ УДАЛЕНИЯ")
+                print(f"Кампаний: {len(refreshed)}")
+                print(f"Уникальных SKU: {len(refreshed_skus)}")
+                print(f"SKU с дублями: {len(refreshed_duplicates)}")
+                print(f"Отчёт удаления: {delete_report}")
+                return 1 if failed else 0
 
             if args.command == "export":
                 return 0

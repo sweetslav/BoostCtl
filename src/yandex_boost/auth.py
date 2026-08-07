@@ -37,6 +37,7 @@ def capture_session_token(page: Page, config: AppConfig) -> str:
         f"?sourceType={config.source_type}&costModel={config.cost_model}"
     )
 
+    print("Открываю кабинет Яндекс Маркета...", flush=True)
     safe_goto(page, boost_url)
 
     current_url = page.url.lower()

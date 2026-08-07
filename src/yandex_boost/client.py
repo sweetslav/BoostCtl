@@ -100,6 +100,44 @@ class YandexBoostClient:
             if isinstance(data, dict) and data.get("error"):
                 raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
 
+    def delete_campaign(self, campaign_id: str) -> None:
+        endpoint = (
+            "https://partner.market.yandex.ru/api/web/monetization/"
+            "deleteSalesCampaignCpa"
+            f"?businessId={self.config.business_id}"
+            f"&sourceType={self.config.source_type}"
+            f"&salesCampaignId={campaign_id}"
+        )
+
+        result = self.page.evaluate(
+            """async ({endpoint, sk}) => {
+                const response = await fetch(endpoint, {
+                    method: "DELETE",
+                    credentials: "include",
+                    headers: {
+                        "accept": "*/*",
+                        "x-requested-with": "XMLHttpRequest",
+                        "sk": sk
+                    }
+                });
+                const text = await response.text();
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    statusText: response.statusText,
+                    text
+                };
+            }""",
+            {"endpoint": endpoint, "sk": self.sk},
+        )
+
+        if not result["ok"]:
+            raise RuntimeError(
+                f"DELETE campaign {campaign_id}: "
+                f"HTTP {result['status']} {result['statusText']}: "
+                f"{result['text'][:1000]}"
+            )
+
     def find_offer_id(self, sku: str) -> str:
         endpoint = (
             "https://partner.market.yandex.ru/monetization/api/resolve/"

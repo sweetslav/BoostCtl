@@ -1,0 +1,3 @@
+[console_scripts]
+boostctl = yandex_boost.cli:main
+yandex-boost = yandex_boost.cli:main

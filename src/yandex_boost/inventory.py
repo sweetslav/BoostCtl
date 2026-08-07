@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+def _progress(message: str) -> None:
+    print(message, flush=True)
+
+
 import csv
 import re
 from dataclasses import dataclass

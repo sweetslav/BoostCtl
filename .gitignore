@@ -5,6 +5,8 @@ browser_profile/
 
 # User data and reports
 data/campaigns.json
+data/campaigns_input.txt
+data/campaigns_to_delete.json
 data/offer_cache.json
 reports/*
 !reports/.gitkeep

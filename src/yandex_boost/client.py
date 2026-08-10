@@ -100,6 +100,38 @@ class YandexBoostClient:
             if isinstance(data, dict) and data.get("error"):
                 raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
 
+    def update_campaign_fee(self, campaign_id: str, fee: float) -> None:
+        endpoint = (
+            "https://partner.market.yandex.ru/api/web/monetization/"
+            "putSalesCampaignFee"
+            f"?businessId={self.config.business_id}"
+            f"&sourceType={self.config.source_type}"
+            f"&salesCampaignId={campaign_id}"
+        )
+        result = self.page.evaluate(
+            """async ({endpoint, sk, fee}) => {
+                const response = await fetch(endpoint, {
+                    method: "PUT",
+                    credentials: "include",
+                    headers: {
+                        "accept": "*/*",
+                        "content-type": "application/json",
+                        "x-requested-with": "XMLHttpRequest",
+                        "sk": sk
+                    },
+                    body: JSON.stringify({fee})
+                });
+                return {ok: response.ok, status: response.status,
+                        statusText: response.statusText, text: await response.text()};
+            }""",
+            {"endpoint": endpoint, "sk": self.sk, "fee": fee},
+        )
+        if not result["ok"]:
+            raise RuntimeError(
+                f"UPDATE fee campaign {campaign_id}: HTTP {result['status']} "
+                f"{result['statusText']}: {result['text'][:1000]}"
+            )
+
     def delete_campaign(self, campaign_id: str) -> None:
         endpoint = (
             "https://partner.market.yandex.ru/api/web/monetization/"

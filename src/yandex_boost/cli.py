@@ -36,12 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=[
             "validate", "preflight", "test", "run", "retry-errors", "export",
-            "delete-preview", "delete", "make-json",
+            "delete-preview", "delete", "make-json", "update-bids-preview", "update-bids",
         ],
     )
     parser.add_argument("--campaigns", default="data/campaigns.json")
     parser.add_argument("--delete-file", default="data/campaigns_to_delete.json")
     parser.add_argument("--input-list", default="data/campaigns_input.txt")
+    parser.add_argument("--fee", type=float, default=None)
     parser.add_argument("--config", default="config.json")
     parser.add_argument("--date", default="")
     parser.add_argument("--start", type=int, default=0)
@@ -165,7 +166,7 @@ def main() -> int:
 
     campaigns = []
     selected = []
-    if args.command not in {"export", "delete-preview", "delete"}:
+    if args.command not in {"export", "delete-preview", "delete", "update-bids-preview", "update-bids"}:
         campaigns = load_campaigns(ROOT / args.campaigns)
 
     if args.command == "validate":
@@ -175,7 +176,7 @@ def main() -> int:
     if campaigns:
         selected = _select_campaigns(args, campaigns, report)
 
-    if not selected and args.command not in {"export", "delete-preview", "delete"}:
+    if not selected and args.command not in {"export", "delete-preview", "delete", "update-bids-preview", "update-bids"}:
         print("Нет строк для обработки.")
         return 0
 
@@ -200,6 +201,54 @@ def main() -> int:
             print(f"Уникальных SKU: {len(existing_skus)}")
             print(f"SKU с дублями: {len(duplicates)}")
             print(f"Снимок сохранён: {inventory_path}")
+
+            if args.command in {"update-bids-preview", "update-bids"}:
+                if args.fee is None or not 0 < args.fee <= 100:
+                    print("ОШИБКА: укажите ставку от 0 до 100 через --fee.")
+                    return 2
+                target = inventory[: args.limit] if args.limit else inventory
+                print("\nПРОВЕРКА ИЗМЕНЕНИЯ СТАВОК")
+                print(f"Целевая ставка: {args.fee:g}%")
+                print(f"Кампаний будет обработано: {len(target)}")
+                for row in target[:20]:
+                    print(f"  {row.campaign_id} | {row.sku} | {row.campaign_name}")
+                if len(target) > 20:
+                    print(f"  ... ещё {len(target) - 20}")
+                if args.command == "update-bids-preview":
+                    print("\nНичего не изменено.")
+                    return 0
+                expected = f"UPDATE {len(target)}"
+                confirmation = input(f"Для продолжения введите {expected}: ").strip()
+                if confirmation != expected:
+                    print("Изменение ставок отменено.")
+                    return 0
+                client = YandexBoostClient(page, config, token)
+                updated = failed = 0
+                update_report = ROOT / "reports" / "update_bid_report.csv"
+                import csv
+                write_header = not update_report.exists()
+                with update_report.open("a", encoding="utf-8-sig", newline="") as file:
+                    writer = csv.DictWriter(file, fieldnames=[
+                        "campaign_id","sku","campaign_name","target_fee","status","details"
+                    ], delimiter=";")
+                    if write_header:
+                        writer.writeheader()
+                    for index, row in enumerate(target, start=1):
+                        print(f"[{index}/{len(target)}] {row.campaign_id} | {row.sku} -> {args.fee:g}%")
+                        try:
+                            client.update_campaign_fee(row.campaign_id, args.fee)
+                            writer.writerow({"campaign_id":row.campaign_id,"sku":row.sku,
+                                "campaign_name":row.campaign_name,"target_fee":args.fee,
+                                "status":"UPDATED","details":""})
+                            updated += 1
+                            page.wait_for_timeout(300)
+                        except Exception as exc:
+                            writer.writerow({"campaign_id":row.campaign_id,"sku":row.sku,
+                                "campaign_name":row.campaign_name,"target_fee":args.fee,
+                                "status":"ERROR","details":f"{type(exc).__name__}: {exc}"})
+                            failed += 1
+                print(f"\nОбновлено: {updated}\nОшибок: {failed}\nОтчёт: {update_report}")
+                return 1 if failed else 0
 
             if args.command in {"delete-preview", "delete"}:
                 delete_ids = _load_delete_ids(ROOT / args.delete_file)

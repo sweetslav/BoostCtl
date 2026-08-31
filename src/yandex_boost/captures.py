@@ -22,6 +22,17 @@ def sanitize_capture(value: object) -> object:
     return value
 
 
+def contains_unredacted_secret_values(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            (item != REDACTED if _is_secret_key(key) else contains_unredacted_secret_values(item))
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(contains_unredacted_secret_values(item) for item in value)
+    return False
+
+
 def _is_secret_key(key: object) -> bool:
     normalized = str(key).casefold()
     return normalized == "sk" or any(part in normalized for part in _SECRET_KEY_PARTS)

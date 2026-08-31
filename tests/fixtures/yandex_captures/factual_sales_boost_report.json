@@ -1,0 +1,20 @@
+{
+  "summary": {"candidate_sales_boost_entries": 2},
+  "entries": [
+    {
+      "pathname": "/salesBoostCampaign/resolveSalesBoostCampaignInitialState",
+      "request_post_data": {"businessId": 950637, "strategyId": 10958486, "sourceType": "BUSINESS", "campaignId": 21930651},
+      "response_json": {"salesCampaignId": 10958486, "strategyId": 10958486, "name": "2020488/1#1 | 04.08.2026", "offerId": "dcmp-13822103539493545641", "fee": 15, "type": "SKU", "subsidyType": "FEE", "isAutostrategy": false, "offerService": "MARKET"}
+    },
+    {
+      "pathname": "/monetizationService/resolveSalesCampaignOffers",
+      "request_post_data": {"salesCampaignId": 10958486, "offerPresetFilter": "WITH_CAMPAIGN", "costModel": "CPA"},
+      "response_json": {"offers": [{"offerId": "dcmp-13822103539493545641"}]}
+    },
+    {
+      "pathname": "/monetizationService/resolveSalesCampaignFeeRecommendation",
+      "request_post_data": {"salesCampaign": {"salesCampaignId": 10958486, "offerId": "dcmp-13822103539493545641", "fee": 15}},
+      "response_json": {"recommendations": []}
+    }
+  ]
+}

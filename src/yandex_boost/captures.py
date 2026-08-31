@@ -14,7 +14,7 @@ def sanitize_capture(value: object) -> object:
     """Copy JSON-like capture data while redacting values of secret-like keys."""
     if isinstance(value, dict):
         return {
-            key: REDACTED if _is_secret_key(key) else sanitize_capture(item)
+            key: REDACTED if is_secret_key(key) else sanitize_capture(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -25,7 +25,7 @@ def sanitize_capture(value: object) -> object:
 def contains_unredacted_secret_values(value: object) -> bool:
     if isinstance(value, dict):
         return any(
-            (item != REDACTED if _is_secret_key(key) else contains_unredacted_secret_values(item))
+            (item != REDACTED if is_secret_key(key) else contains_unredacted_secret_values(item))
             for key, item in value.items()
         )
     if isinstance(value, list):
@@ -33,7 +33,7 @@ def contains_unredacted_secret_values(value: object) -> bool:
     return False
 
 
-def _is_secret_key(key: object) -> bool:
+def is_secret_key(key: object) -> bool:
     normalized = str(key).casefold()
     return normalized == "sk" or any(part in normalized for part in _SECRET_KEY_PARTS)
 

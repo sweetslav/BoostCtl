@@ -14,6 +14,7 @@ class CampaignType(str, Enum):
 class CampaignSource(str, Enum):
     WEB = "WEB"
     LOCAL_REPORT = "LOCAL_REPORT"
+    FACTUAL_HAR = "FACTUAL_HAR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,19 @@ class CampaignRecord:
     updated_at: datetime | str | None = None
     observed_at: datetime | None = None
     raw_status: str | None = None
+    sales_campaign_id: str | None = None
+    strategy_id: str | None = None
+    business_id: str | None = None
+    offer_ids: tuple[str, ...] = ()
+    fee: float | None = None
+    campaign_data_type: str | None = None
+    subsidy_type: str | None = None
+    is_autostrategy: bool | None = None
+    offer_service: str | None = None
+    cost_model: str | None = None
+    source_id: str | None = None
+    source_type: str | None = None
+    legacy_name_hint: str | None = None
 
 
 class CampaignInventory:

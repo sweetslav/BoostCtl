@@ -2,6 +2,8 @@
 browser_profile/
 .env
 *.har
+!tests/fixtures/har/*.har
+local_data/
 
 # User data and reports
 data/campaigns.json

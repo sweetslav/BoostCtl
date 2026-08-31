@@ -3,14 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 from .auth import capture_session_token
-from .cache import OfferCache
 from .client import YandexBoostClient
 from .config import load_campaigns, load_config
 from .generator import InputFormatError, build_campaigns_json
@@ -20,7 +18,6 @@ from .inventory import (
     inventory_skus,
     write_inventory_csv,
 )
-from .logging_setup import setup_logging
 from .report import CsvReport
 from .v2_workflows import apply_sales_create, has_apply_failure, plan_sales_create
 from .create_services import SalesService
@@ -163,9 +160,7 @@ def main() -> int:
         return 0
 
     config = load_config(ROOT / args.config)
-    logger = setup_logging(ROOT / "logs", args.verbose)
     report = CsvReport(ROOT / "reports" / "api_report.csv")
-    cache = OfferCache(ROOT / "data" / "offer_cache.json")
     run_date = resolve_date(args.date)
 
     campaigns = []
@@ -284,91 +279,6 @@ def main() -> int:
                 report.append(sku=str(operation.target["sku"]), bid=float(operation.intent.get("fee") or 0), campaign_name=str(operation.intent["campaign_name"]), offer_id=str(operation.intent.get("offer_id", "")), status=(result.state.value if result.state else operation.disposition.value), details="; ".join(value for value in (result.verification, result.error, *operation.warnings) if value), operation_id=operation.operation_id, execution_state=result.state.value if result.state else "", verification=result.verification, campaign_id=result.campaign_id or "")
             return 1 if has_apply_failure(results) else 0
 
-            new_items = _print_preflight(selected, existing_skus, len(duplicates))
-            if args.command == "preflight":
-                return 0
-
-            if args.command == "test":
-                new_items = new_items[:1]
-
-            if not new_items:
-                print("Создавать нечего: все SKU уже используются в кампаниях.")
-                return 0
-
-            print(f"Дата в названиях: {run_date}")
-            print(f"Режим без создания: {'да' if args.dry_run else 'нет'}")
-
-            client = YandexBoostClient(page, config, token)
-
-            for index, item in enumerate(new_items, start=1):
-                name = f"{item.sku} | {run_date}"
-                logger.info("[%s/%s] %s; bid=%s", index, len(new_items), name, item.bid)
-
-                if item.sku in existing_skus:
-                    logger.info("SKIP: SKU уже присутствует в кампании Яндекса")
-                    report.append(
-                        sku=item.sku,
-                        bid=item.bid,
-                        campaign_name=name,
-                        offer_id="",
-                        status="SKIPPED_EXISTS",
-                        details="SKU already exists in Yandex campaigns.",
-                    )
-                    continue
-
-                offer_id = ""
-                try:
-                    if not args.no_cache:
-                        offer_id = cache.get(item.sku) or ""
-                    if not offer_id:
-                        offer_id = client.find_offer_id(item.sku)
-                        cache.set(item.sku, offer_id)
-
-                    if args.dry_run:
-                        logger.info("VALID: offerId=%s", offer_id)
-                        report.append(
-                            sku=item.sku,
-                            bid=item.bid,
-                            campaign_name=name,
-                            offer_id=offer_id,
-                            status="VALID",
-                            details="Dry run; campaign was not created.",
-                        )
-                        continue
-
-                    response = client.create_campaign(
-                        campaign_name=name,
-                        offer_id=offer_id,
-                        bid=item.bid,
-                    )
-                    report.append(
-                        sku=item.sku,
-                        bid=item.bid,
-                        campaign_name=name,
-                        offer_id=offer_id,
-                        status="CREATED",
-                        details=json.dumps(response, ensure_ascii=False),
-                    )
-                    existing_skus.add(item.sku)
-                    logger.info("CREATED: offerId=%s", offer_id)
-
-                except Exception as exc:  # noqa: BLE001
-                    report.append(
-                        sku=item.sku,
-                        bid=item.bid,
-                        campaign_name=name,
-                        offer_id=offer_id,
-                        status="ERROR",
-                        details=f"{type(exc).__name__}: {exc}",
-                    )
-                    logger.exception("ERROR for SKU %s", item.sku)
-                    if args.command == "test":
-                        return 1
-
-                time.sleep(config.request_delay_seconds)
-
-            print("Готово. См. reports/api_report.csv и reports/campaigns_from_yandex.csv.")
-            return 0
         finally:
             context.close()
 

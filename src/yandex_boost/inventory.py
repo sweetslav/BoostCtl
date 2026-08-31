@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-def _progress(message: str) -> None:
-    print(message, flush=True)
-
-
 import csv
 import re
 from dataclasses import dataclass
@@ -13,6 +9,10 @@ from playwright.sync_api import Page
 
 from .auth import safe_goto
 from .models import AppConfig
+
+
+def _progress(message: str) -> None:
+    print(message, flush=True)
 
 
 CAMPAIGN_NAME_RE = re.compile(r"^(?P<sku>.+?)\s*\|\s*\d{2}\.\d{2}\.\d{4}$")

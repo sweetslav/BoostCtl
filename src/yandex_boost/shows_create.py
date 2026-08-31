@@ -48,6 +48,18 @@ def load_items(path: Path) -> list[dict[str, object]]:
     return items
 
 
+def load_created_skus(path: Path) -> set[str]:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as report_file:
+            return {
+                row["sku"].strip()
+                for row in csv.DictReader(report_file, delimiter=";")
+                if row.get("status") == "CREATED" and row.get("sku")
+            }
+    except Exception:
+        return set()
+
+
 def main() -> int:
     args = parser().parse_args()
     config = load_config(ROOT / args.config)
@@ -59,16 +71,8 @@ def main() -> int:
     if args.limit:
         items = items[: args.limit]
 
-    created_skus: set[str] = set()
     existing_report = ROOT / "reports" / "shows_create_report.csv"
-    if existing_report.exists():
-        try:
-            with existing_report.open("r", encoding="utf-8-sig", newline="") as rf:
-                for row in csv.DictReader(rf, delimiter=";"):
-                    if row.get("status") == "CREATED" and row.get("sku"):
-                        created_skus.add(row["sku"].strip())
-        except Exception:
-            created_skus = set()
+    created_skus = load_created_skus(existing_report) if existing_report.exists() else set()
 
     if created_skus:
         before = len(items)

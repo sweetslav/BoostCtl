@@ -9,6 +9,10 @@ def test_extract_sku_returns_empty_for_unknown_format():
     assert extract_sku_from_campaign_name("ручная кампания") == ""
 
 
+def test_extract_sku_accepts_spaces_around_separator():
+    assert extract_sku_from_campaign_name("  ABC#1   |   07.08.2026  ") == "ABC#1"
+
+
 def test_duplicate_skus():
     rows = [
         CampaignRecord("1", "ABC#1 | 01.08.2026", "ABC#1", "u1"),
@@ -18,3 +22,12 @@ def test_duplicate_skus():
     duplicates = duplicate_skus(rows)
     assert set(duplicates) == {"ABC#1"}
     assert len(duplicates["ABC#1"]) == 2
+
+
+def test_duplicate_skus_ignores_records_without_recognized_sku():
+    rows = [
+        CampaignRecord("1", "ручная кампания", "", "u1"),
+        CampaignRecord("2", "другая ручная кампания", "", "u2"),
+    ]
+
+    assert duplicate_skus(rows) == {}

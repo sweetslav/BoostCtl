@@ -171,7 +171,11 @@ def sales_inventory_to_campaign_records(
     *,
     observed_at: datetime | None = None,
 ) -> list[CampaignRecord]:
-    """Normalize current Sales WEB/UI inventory without inferring unavailable state."""
+    """Normalize legacy read-only Sales WEB/UI observations.
+
+    SKU is derived from the campaign name. This fallback is not factual lifecycle
+    inventory, so unavailable status, bid, and dates remain unset.
+    """
     return [
         CampaignRecord(
             campaign_id=record.campaign_id or None,

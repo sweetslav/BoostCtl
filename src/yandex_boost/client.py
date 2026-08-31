@@ -10,6 +10,18 @@ from playwright.sync_api import Page
 from .models import AppConfig
 
 
+class AmbiguousMutationResult(RuntimeError):
+    """A create request may have reached Yandex; verification is required."""
+
+
+class RemoteRejectedError(RuntimeError):
+    """Yandex returned a definite rejection; the create request did not succeed."""
+
+
+class TransportError(RuntimeError):
+    """The request outcome could not be established locally."""
+
+
 class YandexBoostClient:
     def __init__(self, page: Page, config: AppConfig, sk: str) -> None:
         self.page = page
@@ -24,10 +36,10 @@ class YandexBoostClient:
             f"&costModel={self.config.cost_model}"
         )
 
-    def _fetch(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _fetch(self, endpoint: str, body: dict[str, Any], *, retry: bool = True) -> dict[str, Any]:
         last_error: Exception | None = None
 
-        for attempt in range(1, self.config.max_retries + 1):
+        for attempt in range(1, (self.config.max_retries if retry else 1) + 1):
             try:
                 result = self.page.evaluate(
                     """async ({endpoint, sk, body}) => {
@@ -60,21 +72,28 @@ class YandexBoostClient:
                 )
 
                 if not result["ok"]:
-                    raise RuntimeError(
+                    raise RemoteRejectedError(
                         f"HTTP {result['status']} {result['statusText']}: "
                         f"{result['text'][:1000]}"
                     )
                 if result["json"] is None:
-                    raise RuntimeError(
+                    raise RemoteRejectedError(
                         f"Server returned non-JSON: {result['text'][:1000]}"
                     )
 
                 self._raise_api_error(result["json"])
                 return result["json"]
 
-            except (RuntimeError, PlaywrightError) as exc:
-                last_error = exc
-                if attempt >= self.config.max_retries:
+            except PlaywrightError as exc:
+                last_error = TransportError(str(exc))
+                if attempt >= (self.config.max_retries if retry else 1):
+                    break
+                time.sleep(min(2 ** attempt, 8))
+            except RemoteRejectedError:
+                raise
+            except RuntimeError as exc:
+                last_error = TransportError(str(exc))
+                if attempt >= (self.config.max_retries if retry else 1):
                     break
                 time.sleep(min(2 ** attempt, 8))
 
@@ -84,21 +103,21 @@ class YandexBoostClient:
     @staticmethod
     def _raise_api_error(payload: Any) -> None:
         if not isinstance(payload, dict):
-            raise TypeError("API response is not a JSON object.")
+            raise RemoteRejectedError("API response is not a JSON object.")
 
         results = payload.get("results")
         if not isinstance(results, list) or not results:
-            raise RuntimeError("API response has no results.")
+            raise RemoteRejectedError("API response has no results.")
 
         for result in results:
             if not isinstance(result, dict):
                 continue
             error = result.get("error")
             if error:
-                raise RuntimeError(json.dumps(error, ensure_ascii=False))
+                raise RemoteRejectedError(json.dumps(error, ensure_ascii=False))
             data = result.get("data")
             if isinstance(data, dict) and data.get("error"):
-                raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
+                raise RemoteRejectedError(json.dumps(data["error"], ensure_ascii=False))
 
     def update_campaign_fee(self, campaign_id: str, fee: float) -> None:
         endpoint = (
@@ -245,4 +264,7 @@ class YandexBoostClient:
             ],
             "path": self.edit_path,
         }
-        return self._fetch(endpoint, body)
+        try:
+            return self._fetch(endpoint, body, retry=False)
+        except TransportError as exc:
+            raise AmbiguousMutationResult("Sales create result is unknown; verify before retrying.") from exc

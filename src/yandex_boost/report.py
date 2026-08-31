@@ -13,6 +13,10 @@ FIELDS = [
     "offer_id",
     "status",
     "details",
+    "operation_id",
+    "execution_state",
+    "verification",
+    "campaign_id",
 ]
 
 
@@ -36,6 +40,10 @@ class CsvReport:
         offer_id: str,
         status: str,
         details: str,
+        operation_id: str = "",
+        execution_state: str = "",
+        verification: str = "",
+        campaign_id: str = "",
     ) -> None:
         exists = self.path.exists()
         with self.path.open("a", encoding="utf-8-sig", newline="") as file:
@@ -51,6 +59,10 @@ class CsvReport:
                     "offer_id": offer_id,
                     "status": status,
                     "details": details,
+                    "operation_id": operation_id,
+                    "execution_state": execution_state,
+                    "verification": verification,
+                    "campaign_id": campaign_id,
                 }
             )
 

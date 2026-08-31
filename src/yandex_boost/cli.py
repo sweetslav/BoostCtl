@@ -22,6 +22,10 @@ from .inventory import (
 )
 from .logging_setup import setup_logging
 from .report import CsvReport
+from .v2_workflows import apply_sales_create, has_apply_failure, plan_sales_create
+from .create_services import SalesService
+from .journal import OperationJournal
+from uuid import uuid4
 
 
 ROOT = Path.cwd()
@@ -207,6 +211,25 @@ def main() -> int:
                     print("ОШИБКА: укажите ставку от 0 до 100 через --fee.")
                     return 2
                 target = inventory[: args.limit] if args.limit else inventory
+                journal = OperationJournal(ROOT / "local_data" / "boostctl.db")
+                run_id = str(uuid4())
+                journal.start_run(run_id, "sales.fee_update", [])
+                client = YandexBoostClient(page, config, token)
+                service = SalesService(journal, client)
+                plan = service.plan_fee_update([{"campaign_id": row.campaign_id, "sku": row.sku, "name": row.campaign_name} for row in target], args.fee, run_id=run_id)
+                for operation in plan:
+                    print(f"{operation.disposition.value} {operation.target['campaign_id']} -> {args.fee:g}% | {'; '.join(operation.warnings)}")
+                if args.command == "update-bids-preview":
+                    journal.close()
+                    return 0
+                expected = f"UPDATE {sum(item.executable for item in plan)}"
+                if input(f"Type {expected} to continue: ").strip() != expected:
+                    journal.close()
+                    return 0
+                results = service.apply_fee_update_plan(plan)
+                journal.close()
+                return 1 if has_apply_failure(results) else 0
+                target = inventory[: args.limit] if args.limit else inventory
                 print("\nПРОВЕРКА ИЗМЕНЕНИЯ СТАВОК")
                 print(f"Целевая ставка: {args.fee:g}%")
                 print(f"Кампаний будет обработано: {len(target)}")
@@ -253,6 +276,25 @@ def main() -> int:
             if args.command in {"delete-preview", "delete"}:
                 delete_ids = _load_delete_ids(ROOT / args.delete_file)
                 found, missing = _print_delete_preview(delete_ids, inventory)
+
+                journal = OperationJournal(ROOT / "local_data" / "boostctl.db")
+                run_id = str(uuid4())
+                journal.start_run(run_id, "sales.delete", [])
+                client = YandexBoostClient(page, config, token)
+                service = SalesService(journal, client)
+                plan = service.plan_delete([{"campaign_id": row.campaign_id, "sku": row.sku, "name": row.campaign_name} for row in found], run_id=run_id)
+                for operation in plan:
+                    print(f"{operation.disposition.value} DELETE {operation.target['campaign_id']} | {'; '.join(operation.warnings)}")
+                if args.command == "delete-preview" or missing:
+                    journal.close()
+                    return 0 if not missing else 2
+                expected = f"DELETE {sum(item.executable for item in plan)}"
+                if input(f"Type {expected} to continue: ").strip() != expected:
+                    journal.close()
+                    return 0
+                results = service.apply_delete_plan(plan)
+                journal.close()
+                return 1 if has_apply_failure(results) else 0
 
                 if args.command == "delete-preview":
                     print("\nНичего не удалено.")
@@ -332,6 +374,33 @@ def main() -> int:
 
             if args.command == "export":
                 return 0
+
+            # The V2 planner is the sole Sales create mutation path.
+            v2_items = selected[:1] if args.command == "test" else selected
+            client = YandexBoostClient(page, config, token)
+            input_rows = [{"sku": item.sku, "fee": item.bid} for item in v2_items]
+            journal, plan = plan_sales_create(
+                client, ROOT / "local_data" / "boostctl.db", input_rows, existing_skus, run_date,
+            )
+            for operation in plan:
+                print(f"{operation.disposition.value} {operation.target['sku']} | {operation.intent.get('offer_id', '')} | {operation.source_quality.value} | {'; '.join(operation.warnings)}")
+            if args.command == "preflight" or args.dry_run:
+                for operation in plan:
+                    report.append(sku=str(operation.target["sku"]), bid=float(operation.intent.get("fee") or 0), campaign_name=str(operation.intent["campaign_name"]), offer_id=str(operation.intent.get("offer_id", "")), status=operation.disposition.value, details="; ".join(operation.warnings) or "V2 dry-run", operation_id=operation.operation_id, execution_state="PLANNED", verification="NOT_APPLIED")
+                journal.close()
+                return 0
+
+            def verify(operation):
+                refreshed = fetch_campaign_inventory(page, config)
+                present = str(operation.target["sku"]) in inventory_skus(refreshed)
+                return present, {"sku": operation.target["sku"], "present": present}
+
+            results = apply_sales_create(journal, client, plan, verify, allow_failed_retry=args.command == "retry-errors")
+            journal.close()
+            for result in results:
+                operation = result.operation
+                report.append(sku=str(operation.target["sku"]), bid=float(operation.intent.get("fee") or 0), campaign_name=str(operation.intent["campaign_name"]), offer_id=str(operation.intent.get("offer_id", "")), status=(result.state.value if result.state else operation.disposition.value), details="; ".join(value for value in (result.verification, result.error, *operation.warnings) if value), operation_id=operation.operation_id, execution_state=result.state.value if result.state else "", verification=result.verification, campaign_id=result.campaign_id or "")
+            return 1 if has_apply_failure(results) else 0
 
             new_items = _print_preflight(selected, existing_skus, len(duplicates))
             if args.command == "preflight":

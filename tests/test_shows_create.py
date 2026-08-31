@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from yandex_boost.shows_create import load_created_skus, load_items
 
 
@@ -15,19 +13,10 @@ def test_load_created_skus_uses_only_created_rows(tmp_path):
         "01.08.2026 10:03:00;  SPACE#1  ;CREATED\n",
         encoding="utf-8-sig",
     )
-
     assert load_created_skus(report_path) == {"ABC#1", "SPACE#1"}
 
 
-def test_load_items_rejects_duplicate_sku(tmp_path):
+def test_load_items_keeps_duplicates_for_v2_planner(tmp_path):
     campaigns_path = tmp_path / "shows_campaigns.json"
-    campaigns_path.write_text(
-        json.dumps([
-            {"sku": "ABC#1", "daily_limit": 300},
-            {"sku": "ABC#1", "daily_limit": 500},
-        ]),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(SystemExit, match="дубль SKU"):
-        load_items(campaigns_path)
+    campaigns_path.write_text(json.dumps([{"sku": "ABC#1", "daily_limit": 300}, {"sku": "ABC#1", "daily_limit": 500}]), encoding="utf-8")
+    assert [item["sku"] for item in load_items(campaigns_path)] == ["ABC#1", "ABC#1"]

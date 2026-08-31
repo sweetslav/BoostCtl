@@ -229,49 +229,6 @@ def main() -> int:
                 results = service.apply_fee_update_plan(plan)
                 journal.close()
                 return 1 if has_apply_failure(results) else 0
-                target = inventory[: args.limit] if args.limit else inventory
-                print("\nПРОВЕРКА ИЗМЕНЕНИЯ СТАВОК")
-                print(f"Целевая ставка: {args.fee:g}%")
-                print(f"Кампаний будет обработано: {len(target)}")
-                for row in target[:20]:
-                    print(f"  {row.campaign_id} | {row.sku} | {row.campaign_name}")
-                if len(target) > 20:
-                    print(f"  ... ещё {len(target) - 20}")
-                if args.command == "update-bids-preview":
-                    print("\nНичего не изменено.")
-                    return 0
-                expected = f"UPDATE {len(target)}"
-                confirmation = input(f"Для продолжения введите {expected}: ").strip()
-                if confirmation != expected:
-                    print("Изменение ставок отменено.")
-                    return 0
-                client = YandexBoostClient(page, config, token)
-                updated = failed = 0
-                update_report = ROOT / "reports" / "update_bid_report.csv"
-                import csv
-                write_header = not update_report.exists()
-                with update_report.open("a", encoding="utf-8-sig", newline="") as file:
-                    writer = csv.DictWriter(file, fieldnames=[
-                        "campaign_id","sku","campaign_name","target_fee","status","details"
-                    ], delimiter=";")
-                    if write_header:
-                        writer.writeheader()
-                    for index, row in enumerate(target, start=1):
-                        print(f"[{index}/{len(target)}] {row.campaign_id} | {row.sku} -> {args.fee:g}%")
-                        try:
-                            client.update_campaign_fee(row.campaign_id, args.fee)
-                            writer.writerow({"campaign_id":row.campaign_id,"sku":row.sku,
-                                "campaign_name":row.campaign_name,"target_fee":args.fee,
-                                "status":"UPDATED","details":""})
-                            updated += 1
-                            page.wait_for_timeout(300)
-                        except Exception as exc:
-                            writer.writerow({"campaign_id":row.campaign_id,"sku":row.sku,
-                                "campaign_name":row.campaign_name,"target_fee":args.fee,
-                                "status":"ERROR","details":f"{type(exc).__name__}: {exc}"})
-                            failed += 1
-                print(f"\nОбновлено: {updated}\nОшибок: {failed}\nОтчёт: {update_report}")
-                return 1 if failed else 0
 
             if args.command in {"delete-preview", "delete"}:
                 delete_ids = _load_delete_ids(ROOT / args.delete_file)
@@ -296,81 +253,6 @@ def main() -> int:
                 journal.close()
                 return 1 if has_apply_failure(results) else 0
 
-                if args.command == "delete-preview":
-                    print("\nНичего не удалено.")
-                    return 0
-
-                if missing:
-                    print("\nУДАЛЕНИЕ ОТМЕНЕНО: не все ID найдены в текущем списке.")
-                    return 2
-
-                expected = f"DELETE {len(found)}"
-                print()
-                print("ВНИМАНИЕ: операция необратима.")
-                confirmation = input(f"Для удаления введите {expected}: ").strip()
-                if confirmation != expected:
-                    print("Удаление отменено.")
-                    return 0
-
-                client = YandexBoostClient(page, config, token)
-                deleted = 0
-                failed = 0
-                delete_report = ROOT / "reports" / "delete_report.csv"
-                import csv
-
-                write_header = not delete_report.exists()
-                with delete_report.open("a", encoding="utf-8-sig", newline="") as file:
-                    writer = csv.DictWriter(
-                        file,
-                        fieldnames=["campaign_id", "sku", "campaign_name", "status", "details"],
-                        delimiter=";",
-                    )
-                    if write_header:
-                        writer.writeheader()
-
-                    for index, row in enumerate(found, start=1):
-                        print(f"[{index}/{len(found)}] DELETE {row.campaign_id} | {row.sku}")
-                        try:
-                            client.delete_campaign(row.campaign_id)
-                            writer.writerow(
-                                {
-                                    "campaign_id": row.campaign_id,
-                                    "sku": row.sku,
-                                    "campaign_name": row.campaign_name,
-                                    "status": "DELETED",
-                                    "details": "",
-                                }
-                            )
-                            deleted += 1
-                            page.wait_for_timeout(400)
-                        except Exception as exc:  # noqa: BLE001
-                            writer.writerow(
-                                {
-                                    "campaign_id": row.campaign_id,
-                                    "sku": row.sku,
-                                    "campaign_name": row.campaign_name,
-                                    "status": "ERROR",
-                                    "details": f"{type(exc).__name__}: {exc}",
-                                }
-                            )
-                            print(f"  ERROR: {type(exc).__name__}: {exc}")
-                            failed += 1
-
-                print(f"\nУдалено: {deleted}")
-                print(f"Ошибок: {failed}")
-
-                # Final control snapshot.
-                print("\nОбновляю список кампаний после удаления...", flush=True)
-                refreshed = fetch_campaign_inventory(page, config)
-                write_inventory_csv(refreshed, inventory_path)
-                refreshed_skus = inventory_skus(refreshed)
-                refreshed_duplicates = duplicate_skus(refreshed)
-                print("\nКОНТРОЛЬ ПОСЛЕ УДАЛЕНИЯ")
-                print(f"Кампаний: {len(refreshed)}")
-                print(f"Уникальных SKU: {len(refreshed_skus)}")
-                print(f"SKU с дублями: {len(refreshed_duplicates)}")
-                print(f"Отчёт удаления: {delete_report}")
-                return 1 if failed else 0
 
             if args.command == "export":
                 return 0

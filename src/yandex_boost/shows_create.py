@@ -9,6 +9,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from .auth import capture_session_token
+from .campaigns import CampaignRecord, CampaignSource, CampaignType
 from .config import load_config
 from .shows_client import YandexShowsBoostClient
 
@@ -58,6 +59,34 @@ def load_created_skus(path: Path) -> set[str]:
             }
     except Exception:
         return set()
+
+
+def load_shows_report_observations(path: Path) -> list[CampaignRecord]:
+    """Read local Shows operation history; it is not factual Yandex inventory."""
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as report_file:
+            records: list[CampaignRecord] = []
+            for row in csv.DictReader(report_file, delimiter=";"):
+                sku = (row.get("sku") or "").strip()
+                if row.get("status") != "CREATED" or not sku:
+                    continue
+                try:
+                    daily_limit = int(row["daily_limit"])
+                except (KeyError, TypeError, ValueError):
+                    daily_limit = None
+                records.append(
+                    CampaignRecord(
+                        campaign_id=None,
+                        campaign_type=CampaignType.SHOWS,
+                        source=CampaignSource.LOCAL_REPORT,
+                        name=(row.get("campaign_name") or "").strip() or None,
+                        skus=(sku,),
+                        daily_limit=daily_limit,
+                    )
+                )
+            return records
+    except OSError:
+        return []
 
 
 def main() -> int:

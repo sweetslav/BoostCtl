@@ -3,11 +3,13 @@ from __future__ import annotations
 import csv
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import Page
 
 from .auth import safe_goto
+from .campaigns import CampaignRecord, CampaignSource, CampaignType
 from .models import AppConfig
 
 
@@ -19,7 +21,7 @@ CAMPAIGN_NAME_RE = re.compile(r"^(?P<sku>.+?)\s*\|\s*\d{2}\.\d{2}\.\d{4}$")
 
 
 @dataclass(frozen=True, slots=True)
-class CampaignRecord:
+class SalesInventoryRecord:
     campaign_id: str
     campaign_name: str
     sku: str
@@ -41,7 +43,7 @@ def _campaign_url(config: AppConfig) -> str:
 def _collect_visible(
     page: Page,
     config: AppConfig,
-    records: dict[str, CampaignRecord],
+    records: dict[str, SalesInventoryRecord],
 ) -> int:
     links = page.locator("a[href*='/sales-boost/']")
     added = 0
@@ -60,7 +62,7 @@ def _collect_visible(
             continue
 
         full_url = href if href.startswith("http") else "https://partner.market.yandex.ru" + href
-        records[campaign_id] = CampaignRecord(
+        records[campaign_id] = SalesInventoryRecord(
             campaign_id=campaign_id,
             campaign_name=text,
             sku=extract_sku_from_campaign_name(text),
@@ -85,9 +87,9 @@ def _find_next_button(page: Page):
     return None
 
 
-def fetch_campaign_inventory(page: Page, config: AppConfig) -> list[CampaignRecord]:
+def fetch_campaign_inventory(page: Page, config: AppConfig) -> list[SalesInventoryRecord]:
     safe_goto(page, _campaign_url(config))
-    records: dict[str, CampaignRecord] = {}
+    records: dict[str, SalesInventoryRecord] = {}
     page_number = 1
 
     while page_number <= 20:
@@ -132,19 +134,19 @@ def fetch_campaign_inventory(page: Page, config: AppConfig) -> list[CampaignReco
     return sorted(records.values(), key=lambda row: int(row.campaign_id))
 
 
-def inventory_skus(records: list[CampaignRecord]) -> set[str]:
+def inventory_skus(records: list[SalesInventoryRecord]) -> set[str]:
     return {record.sku for record in records if record.sku}
 
 
-def duplicate_skus(records: list[CampaignRecord]) -> dict[str, list[CampaignRecord]]:
-    grouped: dict[str, list[CampaignRecord]] = {}
+def duplicate_skus(records: list[SalesInventoryRecord]) -> dict[str, list[SalesInventoryRecord]]:
+    grouped: dict[str, list[SalesInventoryRecord]] = {}
     for record in records:
         if record.sku:
             grouped.setdefault(record.sku, []).append(record)
     return {sku: rows for sku, rows in grouped.items() if len(rows) > 1}
 
 
-def write_inventory_csv(records: list[CampaignRecord], path: Path) -> None:
+def write_inventory_csv(records: list[SalesInventoryRecord], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(
@@ -162,3 +164,22 @@ def write_inventory_csv(records: list[CampaignRecord], path: Path) -> None:
                     "url": record.url,
                 }
             )
+
+
+def sales_inventory_to_campaign_records(
+    records: list[SalesInventoryRecord],
+    *,
+    observed_at: datetime | None = None,
+) -> list[CampaignRecord]:
+    """Normalize current Sales WEB/UI inventory without inferring unavailable state."""
+    return [
+        CampaignRecord(
+            campaign_id=record.campaign_id or None,
+            campaign_type=CampaignType.SALES,
+            source=CampaignSource.WEB,
+            name=record.campaign_name or None,
+            skus=(record.sku,) if record.sku else (),
+            observed_at=observed_at,
+        )
+        for record in records
+    ]

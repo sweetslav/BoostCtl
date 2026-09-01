@@ -28,6 +28,18 @@ from uuid import uuid4
 ROOT = Path.cwd()
 
 
+def presentation_action(operation) -> str:
+    if operation.disposition.value == "SKIP":
+        return "SKIP"
+    if operation.disposition.value == "REVIEW":
+        return "REVIEW"
+    return {
+        "CREATE_SALES": "CREATE",
+        "UPDATE_SALES_FEE": "UPDATE_FEE",
+        "DELETE_SALES": "DELETE",
+    }.get(operation.operation_type.value, operation.disposition.value)
+
+
 def sales_apply_summary(results) -> dict[str, int]:
     return {
         "created": sum(result.state.value in ("SUCCEEDED", "VERIFIED") for result in results),
@@ -257,12 +269,12 @@ def main() -> int:
                 service = SalesService(journal, client)
                 plan = service.plan_fee_update([{"campaign_id": row.campaign_id, "sku": row.sku, "name": row.campaign_name} for row in target], args.fee, run_id=run_id)
                 for operation in plan:
-                    print(f"{operation.disposition.value} | campaign_id: {operation.target['campaign_id']} | SKU: {operation.target.get('sku')} | название: {operation.target.get('name')} | ставка: {args.fee:g}% | источник: {operation.source_quality.value}")
+                    print(f"{presentation_action(operation)} | campaign_id: {operation.target['campaign_id']} | SKU: {operation.target.get('sku')} | название: {operation.target.get('name')} | ставка: {args.fee:g}% | источник: {operation.source_quality.value}")
                 if args.command == "update-bids-preview":
                     journal.close()
                     return 0
                 expected = f"UPDATE {sum(item.executable for item in plan)}"
-                if input(f"Type {expected} to continue: ").strip() != expected:
+                if input(f"Для продолжения введите {expected}: ").strip() != expected:
                     print("Операция отменена. Изменений не выполнено.")
                     journal.close()
                     return 0
@@ -292,7 +304,7 @@ def main() -> int:
                 service = SalesService(journal, client)
                 plan = service.plan_delete([{"campaign_id": row.campaign_id, "sku": row.sku, "name": row.campaign_name} for row in found], run_id=run_id)
                 for operation in plan:
-                    print(f"{operation.disposition.value} | Действие: DELETE | campaign_id: {operation.target['campaign_id']} | SKU: {operation.target.get('sku')} | название: {operation.target.get('name')} | источник: {operation.source_quality.value}")
+                    print(f"{presentation_action(operation)} | campaign_id: {operation.target['campaign_id']} | SKU: {operation.target.get('sku')} | название: {operation.target.get('name')} | источник: {operation.source_quality.value}")
                 if args.command == "delete-preview" or missing:
                     journal.close()
                     return 0 if not missing else 2
@@ -324,7 +336,7 @@ def main() -> int:
                 client, ROOT / "local_data" / "boostctl.db", input_rows, existing_skus, run_date,
             )
             for operation in plan:
-                print(f"{operation.disposition.value} {operation.target['sku']} | {operation.intent.get('offer_id', '')} | {operation.source_quality.value} | {'; '.join(operation.warnings)}")
+                print(f"{presentation_action(operation)} {operation.target['sku']} | {operation.intent.get('offer_id', '')} | {operation.source_quality.value} | {'; '.join(operation.warnings)}")
             if args.command == "preflight" or args.dry_run:
                 for operation in plan:
                     report.append(sku=str(operation.target["sku"]), bid=float(operation.intent.get("fee") or 0), campaign_name=str(operation.intent["campaign_name"]), offer_id=str(operation.intent.get("offer_id", "")), status=operation.disposition.value, details="; ".join(operation.warnings) or "V2 dry-run", operation_id=operation.operation_id, execution_state="PLANNED", verification="NOT_APPLIED")

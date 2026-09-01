@@ -12,6 +12,18 @@ from .shows_create import ROOT, load_created_skus, load_items, parser
 from .v2_workflows import apply_shows_create, has_apply_failure, plan_shows_create
 
 
+def shows_apply_summary(results) -> dict[str, int]:
+    return {
+        "successful": sum(result.state.value in ("SUCCEEDED", "VERIFIED") for result in results),
+        "failed": sum(result.state.value == "FAILED" for result in results),
+        "unknown": sum(result.state.value == "UNKNOWN_RESULT" for result in results),
+        "verified": sum(result.verification == "VERIFIED" for result in results),
+        "not_verified": sum(result.verification == "NOT_VERIFIED" for result in results),
+        "skipped": sum(not result.operation.executable for result in results),
+        "review": sum(result.operation.disposition.value == "REVIEW" for result in results),
+    }
+
+
 def main() -> int:
     args = parser().parse_args()
     if args.start < 0:
@@ -31,6 +43,13 @@ def main() -> int:
             for operation in plan:
                 print(f"{operation.disposition.value} {operation.target['sku']} | {operation.intent.get('offer_id', '')} | {operation.source_quality.value} | {'; '.join(operation.warnings)}")
             results = [] if args.dry_run else apply_shows_create(journal, client, plan)
+            if not args.dry_run:
+                for result in results:
+                    print(f"SKU: {result.operation.target['sku']} | Действие: CREATE | Результат: {result.state.value if result.state else result.operation.disposition.value} | Проверка: {result.verification} | Campaign ID: {result.campaign_id or 'неизвестен'}")
+                    if result.error:
+                        print(f"Ошибка: {result.error}")
+                summary = shows_apply_summary(results)
+                print(f"Итог: успешно {summary['successful']} | ошибок {summary['failed']} | неопределённых {summary['unknown']} | проверено {summary['verified']} | не проверено {summary['not_verified']} | пропущено {summary['skipped']} | требует проверки {summary['review']}")
             report_path.parent.mkdir(exist_ok=True)
             write_header = not report_path.exists()
             with report_path.open("a", encoding="utf-8-sig", newline="") as output:

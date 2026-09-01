@@ -41,10 +41,22 @@ def load_items(path: Path) -> list[dict[str, object]]:
     return items
 
 
+def _is_successful_create_row(row: dict[str, str]) -> bool:
+    execution_state = (row.get("execution_state") or "").strip().upper()
+    if execution_state:
+        return execution_state in {"SUCCEEDED", "VERIFIED"}
+    status = (row.get("status") or "").strip().upper()
+    return status in {"CREATED", "SUCCEEDED", "VERIFIED"}
+
+
 def load_created_skus(path: Path) -> set[str]:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as report_file:
-            return {row["sku"].strip() for row in csv.DictReader(report_file, delimiter=";") if row.get("status") == "CREATED" and row.get("sku")}
+            return {
+                row["sku"].strip()
+                for row in csv.DictReader(report_file, delimiter=";")
+                if _is_successful_create_row(row) and row.get("sku")
+            }
     except OSError:
         return set()
 
@@ -56,7 +68,7 @@ def load_shows_report_observations(path: Path) -> list[CampaignRecord]:
             records: list[CampaignRecord] = []
             for row in csv.DictReader(report_file, delimiter=";"):
                 sku = (row.get("sku") or "").strip()
-                if row.get("status") != "CREATED" or not sku:
+                if not _is_successful_create_row(row) or not sku:
                     continue
                 try:
                     daily_limit = int(row["daily_limit"])

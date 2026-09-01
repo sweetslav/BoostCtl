@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import Page
+from playwright.sync_api import Error as PlaywrightError
 
 from .auth import safe_goto
 from .campaigns import CampaignRecord, CampaignSource, CampaignType
@@ -45,14 +46,24 @@ def _collect_visible(
     config: AppConfig,
     records: dict[str, SalesInventoryRecord],
 ) -> int:
-    links = page.locator("a[href*='/sales-boost/']")
     added = 0
     prefix = f"/business/{config.business_id}/sales-boost/"
+    snapshot = None
+    for attempt in range(3):
+        try:
+            snapshot = page.locator("a[href*='/sales-boost/']").evaluate_all(
+                "links => links.map(link => ({href: link.getAttribute('href') || '', text: (link.innerText || '').trim()}))"
+            )
+            break
+        except PlaywrightError as exc:
+            if attempt == 2:
+                raise RuntimeError("Campaign inventory DOM remained unstable after 3 snapshots.") from exc
+            page.wait_for_timeout(200)
+    assert snapshot is not None
 
-    for index in range(links.count()):
-        link = links.nth(index)
-        href = link.get_attribute("href") or ""
-        text = (link.inner_text(timeout=1_000) or "").strip()
+    for link in snapshot:
+        href = str(link.get("href", ""))
+        text = str(link.get("text", "")).strip()
         if not href or not text or prefix not in href:
             continue
 

@@ -28,6 +28,17 @@ from uuid import uuid4
 ROOT = Path.cwd()
 
 
+def sales_apply_summary(results) -> dict[str, int]:
+    return {
+        "created": sum(result.state.value in ("SUCCEEDED", "VERIFIED") for result in results),
+        "failed": sum(result.state.value == "FAILED" for result in results),
+        "unknown": sum(result.state.value == "UNKNOWN_RESULT" for result in results),
+        "verified": sum(result.verification == "VERIFIED" for result in results),
+        "skipped": sum(not result.operation.executable for result in results),
+        "review": sum(result.operation.disposition.value == "REVIEW" for result in results),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="boostctl",
@@ -196,7 +207,7 @@ def main() -> int:
             existing_skus = inventory_skus(inventory)
             duplicates = duplicate_skus(inventory)
 
-            print(f"Фактических кампаний в Яндексе: {len(inventory)}")
+            print(f"Кампаний, наблюдаемых в интерфейсе Яндекса: {len(inventory)}")
             print(f"Уникальных SKU: {len(existing_skus)}")
             print(f"SKU с дублями: {len(duplicates)}")
             print(f"Снимок сохранён: {inventory_path}")
@@ -276,7 +287,17 @@ def main() -> int:
             journal.close()
             for result in results:
                 operation = result.operation
+                print(
+                    f"SKU: {operation.target['sku']} | Действие: CREATE | "
+                    f"Результат: {result.state.value if result.state else operation.disposition.value} | "
+                    f"Проверка: {result.verification} | "
+                    f"Campaign ID: {result.campaign_id or 'неизвестен'}"
+                )
+                if result.error:
+                    print(f"Ошибка: {result.error}")
                 report.append(sku=str(operation.target["sku"]), bid=float(operation.intent.get("fee") or 0), campaign_name=str(operation.intent["campaign_name"]), offer_id=str(operation.intent.get("offer_id", "")), status=(result.state.value if result.state else operation.disposition.value), details="; ".join(value for value in (result.verification, result.error, *operation.warnings) if value), operation_id=operation.operation_id, execution_state=result.state.value if result.state else "", verification=result.verification, campaign_id=result.campaign_id or "")
+            summary = sales_apply_summary(results)
+            print(f"Итог: создано {summary['created']} | ошибок {summary['failed']} | неопределённых {summary['unknown']} | проверено {summary['verified']} | пропущено {summary['skipped']} | требует проверки {summary['review']}")
             return 1 if has_apply_failure(results) else 0
 
         finally:

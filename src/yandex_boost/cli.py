@@ -39,6 +39,16 @@ def sales_apply_summary(results) -> dict[str, int]:
     }
 
 
+def fee_apply_summary(results) -> dict[str, int]:
+    return {
+        "successful": sum(result.state.value in ("SUCCEEDED", "VERIFIED") for result in results),
+        "failed": sum(result.state.value == "FAILED" for result in results),
+        "unknown": sum(result.state.value == "UNKNOWN_RESULT" for result in results),
+        "verified": sum(result.verification == "VERIFIED" for result in results),
+        "not_verified": sum(result.verification == "NOT_VERIFIED" for result in results),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="boostctl",
@@ -59,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--date", default="")
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--campaign-id", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--verbose", action="store_true")
@@ -143,6 +154,24 @@ def _print_delete_preview(delete_ids: list[str], inventory) -> tuple[list, list[
 
     return found, missing
 
+
+def select_fee_targets(inventory, campaign_id: str, limit: int):
+    if campaign_id:
+        matches = [row for row in inventory if row.campaign_id == campaign_id]
+        if len(matches) != 1:
+            raise ValueError(f"Campaign ID {campaign_id} was not found exactly once in UI inventory.")
+        return matches
+    return inventory[:limit] if limit else inventory
+
+
+def select_delete_targets(inventory, campaign_id: str, delete_ids: list[str]):
+    if campaign_id:
+        matches = [row for row in inventory if row.campaign_id == campaign_id]
+        if len(matches) != 1:
+            raise ValueError(f"Campaign ID {campaign_id} was not found exactly once in UI inventory.")
+        return matches, []
+    return _print_delete_preview(delete_ids, inventory)
+
 def main() -> int:
     args = build_parser().parse_args()
 
@@ -216,7 +245,11 @@ def main() -> int:
                 if args.fee is None or not 0 < args.fee <= 100:
                     print("ОШИБКА: укажите ставку от 0 до 100 через --fee.")
                     return 2
-                target = inventory[: args.limit] if args.limit else inventory
+                try:
+                    target = select_fee_targets(inventory, args.campaign_id, args.limit)
+                except ValueError as exc:
+                    print(f"ОШИБКА: {exc}")
+                    return 2
                 journal = OperationJournal(ROOT / "local_data" / "boostctl.db")
                 run_id = str(uuid4())
                 journal.start_run(run_id, "sales.fee_update", [])
@@ -224,21 +257,33 @@ def main() -> int:
                 service = SalesService(journal, client)
                 plan = service.plan_fee_update([{"campaign_id": row.campaign_id, "sku": row.sku, "name": row.campaign_name} for row in target], args.fee, run_id=run_id)
                 for operation in plan:
-                    print(f"{operation.disposition.value} {operation.target['campaign_id']} -> {args.fee:g}% | {'; '.join(operation.warnings)}")
+                    print(f"{operation.disposition.value} | campaign_id: {operation.target['campaign_id']} | SKU: {operation.target.get('sku')} | название: {operation.target.get('name')} | ставка: {args.fee:g}% | источник: {operation.source_quality.value}")
                 if args.command == "update-bids-preview":
                     journal.close()
                     return 0
                 expected = f"UPDATE {sum(item.executable for item in plan)}"
                 if input(f"Type {expected} to continue: ").strip() != expected:
+                    print("Операция отменена. Изменений не выполнено.")
                     journal.close()
                     return 0
                 results = service.apply_fee_update_plan(plan)
                 journal.close()
+                for result in results:
+                    operation = result.operation
+                    print(f"campaign_id: {operation.target['campaign_id']} | SKU: {operation.target.get('sku')} | ставка: {operation.intent['requested_fee']:g}% | Результат: {result.state.value} | Проверка: {result.verification}")
+                    if result.error:
+                        print(f"Ошибка: {result.error}")
+                summary = fee_apply_summary(results)
+                print(f"Итог: успешно {summary['successful']} | ошибок {summary['failed']} | неопределённых {summary['unknown']} | проверено {summary['verified']} | не проверено {summary['not_verified']}")
                 return 1 if has_apply_failure(results) else 0
 
             if args.command in {"delete-preview", "delete"}:
-                delete_ids = _load_delete_ids(ROOT / args.delete_file)
-                found, missing = _print_delete_preview(delete_ids, inventory)
+                delete_ids = _load_delete_ids(ROOT / args.delete_file) if not args.campaign_id else []
+                try:
+                    found, missing = select_delete_targets(inventory, args.campaign_id, delete_ids)
+                except ValueError as exc:
+                    print(f"ОШИБКА: {exc}")
+                    return 2
 
                 journal = OperationJournal(ROOT / "local_data" / "boostctl.db")
                 run_id = str(uuid4())
@@ -247,16 +292,24 @@ def main() -> int:
                 service = SalesService(journal, client)
                 plan = service.plan_delete([{"campaign_id": row.campaign_id, "sku": row.sku, "name": row.campaign_name} for row in found], run_id=run_id)
                 for operation in plan:
-                    print(f"{operation.disposition.value} DELETE {operation.target['campaign_id']} | {'; '.join(operation.warnings)}")
+                    print(f"{operation.disposition.value} | Действие: DELETE | campaign_id: {operation.target['campaign_id']} | SKU: {operation.target.get('sku')} | название: {operation.target.get('name')} | источник: {operation.source_quality.value}")
                 if args.command == "delete-preview" or missing:
                     journal.close()
                     return 0 if not missing else 2
                 expected = f"DELETE {sum(item.executable for item in plan)}"
-                if input(f"Type {expected} to continue: ").strip() != expected:
+                targets = ", ".join(f"{item.target['campaign_id']} ({item.target.get('sku')})" for item in plan if item.executable)
+                if input(f"Удаление: {targets}. Введите {expected}: ").strip() != expected:
+                    print("Операция отменена. Изменений не выполнено.")
                     journal.close()
                     return 0
                 results = service.apply_delete_plan(plan)
                 journal.close()
+                for result in results:
+                    print(f"campaign_id: {result.operation.target['campaign_id']} | SKU: {result.operation.target.get('sku')} | Результат: {result.state.value} | Проверка: {result.verification}")
+                    if result.error:
+                        print(f"Ошибка: {result.error}")
+                summary = fee_apply_summary(results)
+                print(f"Итог: успешно {summary['successful']} | ошибок {summary['failed']} | неопределённых {summary['unknown']} | проверено {summary['verified']} | не проверено {summary['not_verified']}")
                 return 1 if has_apply_failure(results) else 0
 
 

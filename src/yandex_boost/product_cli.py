@@ -18,7 +18,7 @@ from .inventory import duplicate_skus, fetch_campaign_inventory, inventory_skus,
 from .operator_workflows import delete_preview, fee_preview, sales_create_preview, shows_create_preview
 from .presentation import presentation_action
 from .shows_client import YandexShowsBoostClient
-from .shows_create import load_created_skus
+from .shows_inventory import fetch_shows_campaign_inventory, shows_summary
 from .v2_workflows import apply_sales_create, apply_shows_create
 
 
@@ -162,10 +162,9 @@ def run_sales_create(session: OperatorSession, skus: list[str], fee: float) -> N
 
 
 def run_shows_create(session: OperatorSession, skus: list[str], daily_limit: int) -> None:
-    history_skus = load_created_skus(ROOT / "reports" / "shows_create_report.csv")
-    journal, plan = shows_create_preview(
-        session.shows_client, [{"sku": sku, "daily_limit": daily_limit} for sku in skus],
-        history_skus, session.journal_path,
+    journal, plan, _ = shows_create_preview(
+        session.page, session.config, session.shows_client,
+        [{"sku": sku, "daily_limit": daily_limit} for sku in skus], session.journal_path,
     )
     try:
         render_preview(plan)
@@ -250,14 +249,21 @@ def inventory_menu(session: OperatorSession) -> None:
     render_inventory(records)
     print(f"Снимок: {snapshot}")
     while True:
-        print("\n1. Поиск по SKU\n2. Поиск по campaign_id\n3. Показать полный список\n0. Назад")
+        print("\n1. Буст продаж\n2. Буст показов\n3. Все кампании\n0. Назад")
         choice = _choose("> ")
         if choice == "1":
-            render_inventory(records, sku=_choose("SKU: "))
+            render_inventory(records, show_all=True)
         elif choice == "2":
-            render_inventory(records, campaign_id=_choose("campaign_id: "))
+            shows_records = fetch_shows_campaign_inventory(session.page, session.config)
+            summary = shows_summary(shows_records)
+            print(f"Всего кампаний: {summary['total']}\nАктивных: {summary['active']}\nОстановленных/закрытых: {summary['stopped_or_closed']}\nНеизвестный статус: {summary['unknown']}")
+            for record in shows_records:
+                print(f"{record.campaign_id} | {record.sku or '-'} | {record.name} | {record.raw_status or '-'} | {record.daily_limit or '-'} | {record.url}")
         elif choice == "3":
             render_inventory(records, show_all=True)
+            shows_records = fetch_shows_campaign_inventory(session.page, session.config)
+            for record in shows_records:
+                print(f"SHOWS | {record.campaign_id} | {record.sku or '-'} | {record.name} | {record.raw_status or '-'}")
         elif choice == "0":
             return
 

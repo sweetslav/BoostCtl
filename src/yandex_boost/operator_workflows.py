@@ -6,7 +6,8 @@ from typing import Any
 
 from .create_services import SalesService
 from .inventory import fetch_campaign_inventory, inventory_skus
-from .v2_workflows import plan_sales_create, plan_shows_create, start_journal
+from .shows_inventory import fetch_shows_campaign_inventory
+from .v2_workflows import plan_sales_create, start_journal
 
 
 def sales_create_preview(page: Any, config: Any, client: Any, items: list[dict[str, object]], journal_path: Path):
@@ -14,8 +15,14 @@ def sales_create_preview(page: Any, config: Any, client: Any, items: list[dict[s
     return plan_sales_create(client, journal_path, items, inventory_skus(inventory), datetime.now().astimezone().strftime("%d.%m.%Y"))
 
 
-def shows_create_preview(client: Any, items: list[dict[str, object]], history_skus: set[str], journal_path: Path):
-    return plan_shows_create(client, journal_path, items, history_skus, datetime.now().astimezone().strftime("%d.%m.%Y"))
+def shows_create_preview(page: Any, config: Any, client: Any, items: list[dict[str, object]], journal_path: Path):
+    records = fetch_shows_campaign_inventory(page, config)
+    journal, run_id = start_journal(journal_path, "shows.create", items)
+    from .create_services import ShowsService
+    plan = ShowsService(journal, client).plan_create_from_inventory(
+        items, records, run_id=run_id, date=datetime.now().astimezone().strftime("%d.%m.%Y"),
+    )
+    return journal, plan, records
 
 
 def fee_preview(page: Any, config: Any, client: Any, target: Any, fee: float, journal_path: Path):

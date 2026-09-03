@@ -13,9 +13,11 @@ class Client:
     def find_offer_id(self, sku): return f"offer-{sku}"
 
 
-def test_shows_operator_preview_uses_v2_planner_without_mutation(tmp_path):
-    journal, plan = shows_create_preview(Client(), [{"sku": "A", "daily_limit": 300}], set(), tmp_path / "db.sqlite")
+def test_shows_operator_preview_uses_v2_planner_without_mutation(tmp_path, monkeypatch):
+    monkeypatch.setattr("yandex_boost.operator_workflows.fetch_shows_campaign_inventory", lambda *_: [])
+    journal, plan, records = shows_create_preview(Page(), object(), Client(), [{"sku": "A", "daily_limit": 300}], tmp_path / "db.sqlite")
     assert plan[0].intent["offer_id"] == "offer-A"
+    assert records == []
     journal.close()
 
 

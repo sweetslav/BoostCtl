@@ -8,8 +8,9 @@ from playwright.sync_api import sync_playwright
 from .auth import capture_session_token
 from .config import load_config
 from .shows_client import YandexShowsBoostClient
-from .shows_create import ROOT, load_created_skus, load_items, parser
-from .v2_workflows import apply_shows_create, has_apply_failure, plan_shows_create
+from .shows_create import ROOT, load_items, parser
+from .operator_workflows import shows_create_preview
+from .v2_workflows import apply_shows_create, has_apply_failure
 
 
 def shows_apply_summary(results) -> dict[str, int]:
@@ -33,13 +34,12 @@ def main() -> int:
     if args.limit:
         items = items[: args.limit]
     report_path = ROOT / "reports" / "shows_create_report.csv"
-    history_skus = load_created_skus(report_path)
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(user_data_dir=str(ROOT / "browser_profile"), headless=False, viewport={"width": 1400, "height": 900})
         page = context.pages[0] if context.pages else context.new_page()
         try:
             client = YandexShowsBoostClient(page, config, capture_session_token(page, config))
-            journal, plan = plan_shows_create(client, ROOT / "local_data" / "boostctl.db", items, history_skus, datetime.now().astimezone().strftime("%d.%m.%Y"))
+            journal, plan, _ = shows_create_preview(page, config, client, items, ROOT / "local_data" / "boostctl.db")
             for operation in plan:
                 print(f"{operation.disposition.value} {operation.target['sku']} | {operation.intent.get('offer_id', '')} | {operation.source_quality.value} | {'; '.join(operation.warnings)}")
             results = [] if args.dry_run else apply_shows_create(journal, client, plan)

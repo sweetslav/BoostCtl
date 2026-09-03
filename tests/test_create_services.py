@@ -4,6 +4,7 @@ from yandex_boost.client import AmbiguousMutationResult, RemoteRejectedError
 from yandex_boost.create_services import SalesService, ShowsService
 from yandex_boost.journal import OperationJournal
 from yandex_boost.operations import OperationState, PlanDisposition, SourceQuality
+from yandex_boost.shows_inventory import ShowsInventoryRecord
 
 
 class FakeClient:
@@ -102,6 +103,19 @@ def test_partial_batch_and_shows_history_are_safe(tmp_path):
     assert plan[0].disposition is PlanDisposition.SKIP
     assert plan[1].intent["daily_limit"] == 500
     assert len(client.calls) == 1 and results[1].state is OperationState.SUCCEEDED
+    journal.close()
+
+
+def test_shows_current_inventory_controls_duplicate_protection(tmp_path):
+    journal = OperationJournal(tmp_path / "boostctl.db")
+    client = FakeClient()
+    service = ShowsService(journal, client)
+    active = [ShowsInventoryRecord("1", "A", "A", "ACTIVE", None, None, "url", "DOM")]
+    stopped = [ShowsInventoryRecord("1", "A", "A", "STOPPED", None, None, "url", "DOM")]
+    unknown = [ShowsInventoryRecord("1", "A", "A", "PAUSED", None, None, "url", "DOM")]
+    assert service.plan_create_from_inventory([{"sku": "A", "daily_limit": 300}], active, run_id="run", date="01.01.2026")[0].disposition is PlanDisposition.SKIP
+    assert service.plan_create_from_inventory([{"sku": "A", "daily_limit": 300}], stopped, run_id="run", date="01.01.2026")[0].disposition is PlanDisposition.CREATE
+    assert service.plan_create_from_inventory([{"sku": "A", "daily_limit": 300}], unknown, run_id="run", date="01.01.2026")[0].disposition is PlanDisposition.REVIEW
     journal.close()
 
 

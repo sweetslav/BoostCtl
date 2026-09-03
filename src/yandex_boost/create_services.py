@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
@@ -255,6 +255,24 @@ class ShowsService(_CreateService):
 
     def plan_create(self, items: list[dict[str, object]], history_skus: set[str], *, run_id: str | None = None, date: str) -> list[PlannedOperation]:
         return self._plan(items, history_skus, SourceQuality.LOCAL_HISTORY, run_id=run_id, date=date)
+
+    def plan_create_from_inventory(self, items, records, *, run_id: str | None = None, date: str):
+        from .shows_inventory import shows_duplicate_disposition
+
+        plan = self._plan(items, set(), SourceQuality.UI_OBSERVED, run_id=run_id, date=date)
+        result = []
+        for operation in plan:
+            disposition, status = shows_duplicate_disposition(records, str(operation.target["sku"]))
+            if operation.disposition is not PlanDisposition.CREATE:
+                result.append(operation)
+                continue
+            if disposition == "CREATE":
+                result.append(operation)
+            elif disposition == "SKIP":
+                result.append(replace(operation, disposition=PlanDisposition.SKIP, warnings=(f"Active Shows campaign: {status}",)))
+            else:
+                result.append(replace(operation, disposition=PlanDisposition.REVIEW, warnings=(f"Shows campaign status requires review: {status or 'ambiguous'}",)))
+        return result
 
     def _create(self, operation: PlannedOperation) -> dict[str, Any]:
         return self.client.create_campaign(

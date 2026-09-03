@@ -18,3 +18,12 @@ def test_cli_does_not_call_low_level_mutations_directly():
     assert "update_campaign_fee" not in calls
     assert "delete_campaign" not in calls
     assert "create_campaign" not in calls
+
+
+def test_product_cli_routes_operator_mutations_only_through_v2_services():
+    source = Path("src/yandex_boost/product_cli.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    calls = [node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)]
+    assert "update_campaign_fee" not in calls
+    assert "delete_campaign" not in calls
+    assert "create_campaign" not in calls

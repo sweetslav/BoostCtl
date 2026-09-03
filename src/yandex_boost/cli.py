@@ -22,22 +22,11 @@ from .report import CsvReport
 from .v2_workflows import apply_sales_create, has_apply_failure, plan_sales_create
 from .create_services import SalesService
 from .journal import OperationJournal
+from .presentation import presentation_action
 from uuid import uuid4
 
 
 ROOT = Path.cwd()
-
-
-def presentation_action(operation) -> str:
-    if operation.disposition.value == "SKIP":
-        return "SKIP"
-    if operation.disposition.value == "REVIEW":
-        return "REVIEW"
-    return {
-        "CREATE_SALES": "CREATE",
-        "UPDATE_SALES_FEE": "UPDATE_FEE",
-        "DELETE_SALES": "DELETE",
-    }.get(operation.operation_type.value, operation.disposition.value)
 
 
 def sales_apply_summary(results) -> dict[str, int]:
